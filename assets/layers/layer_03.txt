@@ -4,9 +4,9 @@
 .......ggggggggg
 .......ggggggggg
 .........ggggggg
-.........ggggggg
-.........ggggggg
-.........ggggggg
+.........ggwwwgg
+.........ggwwwgg
+.........ggwwwgg
 .........ggggggg
 .........ggggggg
 ................
