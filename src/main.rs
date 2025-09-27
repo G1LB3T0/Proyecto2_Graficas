@@ -1,14 +1,14 @@
 mod camera;
 mod geometry;
-mod scene;
-mod light;
-mod util;
 mod raytracer;
+mod light;
+mod hud;
 
 use raylib::prelude::*;
 use camera::OrbitCamRT;
-use scene::SceneRT;
+use raytracer::SceneRT;
 use light::LightRig;
+use hud::Hud;
 
 fn main() {
     let (mut rl, thread) = raylib::init()
@@ -21,8 +21,10 @@ fn main() {
     // Resolución del render (F1 alterna entre 1/2 y 1x)
     let mut half_res = true;
 
-    // Textura del cubo (con fallback si falta en disco)
-    let tex_img = util::texture::load_or_make_texture("assets/texture1.png");
+    // Carga TRES texturas del cubo (top/side/bottom)
+    let tex_top    = image::open("assets/grasstop.png").expect("Falta assets/grasstop.png").to_rgba8();
+    let tex_side   = image::open("assets/grass.png").expect("Falta assets/grass.png").to_rgba8();
+    let tex_bottom = image::open("assets/dirt.png").expect("Falta assets/dirt.png").to_rgba8();
 
     // Cámara / escena
     let cam = OrbitCamRT::new(Vector3::new(0.0, 0.5, 0.0), 1280.0/720.0);
@@ -32,11 +34,14 @@ fn main() {
         floor_color: Vector3::new(0.18, 0.2, 0.23),
         cube_center: Vector3::new(0.0, 0.5, 0.0),
         cube_half: 0.5,
-        tex: tex_img,
+        tex_top,
+        tex_side,
+        tex_bottom,
     };
 
-    // Luz en coordenadas esféricas controlada por teclado
+    // Luz orbital y HUD
     let mut light_rig = LightRig::from_position(scene.cube_center, scene.light_pos);
+    let mut hud = Hud::new();
 
     // Texture destino donde subiremos el render de CPU
     let (mut tex_w, mut tex_h) = if half_res { (640, 360) } else { (1280, 720) };
@@ -46,8 +51,9 @@ fn main() {
     while !rl.window_should_close() {
         // ---- INPUT ----
         scene.cam.apply_input(&rl);
+        hud.update_input(&rl);
 
-        // Luz (J/L yaw, I/K pitch, U/O radio, P spin, T reset)
+        // Luz: rotación/orbita
         let dt = rl.get_frame_time();
         light_rig.update_input(&rl, dt);
         scene.light_pos = light_rig.position();
@@ -63,12 +69,10 @@ fn main() {
         // ---- RENDER CPU (multihilo) ----
         let img = raytracer::render_mt(&scene, tex_w as u32, tex_h as u32);
 
-        // Subir al Texture2D (tu build usa 1 argumento; maneja Result para evitar warning)
+        // Subir al Texture2D (tu build usa 1 argumento; maneja Result)
         if let Err(e) = rtex.update_texture(img.as_raw()) {
             eprintln!("update_texture error: {e:?}");
         }
-        // Si tu firma requiere &thread, usa:
-        // if let Err(e) = rtex.update_texture(&thread, img.as_raw()) { eprintln!("update_texture error: {e:?}"); }
 
         // ---- ESCALA Y ASPECT (antes de begin_drawing) ----
         let sw: f32 = rl.get_screen_width()  as f32;
@@ -76,8 +80,6 @@ fn main() {
         let sx: f32 = sw / tex_w as f32;
         let sy: f32 = sh / tex_h as f32;
         let scale: f32 = sx.min(sy);
-
-        // Mantén la cámara con aspect correcto del viewport
         scene.cam.aspect = sw / sh;
 
         // ---- DRAW ----
@@ -86,10 +88,7 @@ fn main() {
 
         d.draw_texture_ex(&rtex, Vector2::new(0.0, 0.0), 0.0, scale, Color::WHITE);
 
-        d.draw_text("CPU RT | Mouse L: orbit cam | Wheel: zoom | R: reset cam | F1: res",
-                    10, 10, 18, Color::BLACK);
-        d.draw_text("Light: J/L yaw | I/K pitch | U/O radius | P spin | T reset",
-                    10, 32, 18, Color::BLACK);
-        d.draw_fps(10, 54);
+        // HUD (toggle con H)
+        hud.draw(&mut d);
     }
 }
