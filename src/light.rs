@@ -8,12 +8,13 @@ pub struct LightRig {
     pub radius: f32,
     pub target: Vector3,
     pub spin: bool,
+    pub min_radius: f32, // ← campo público para fijar radio mínimo
 }
 
 impl LightRig {
     pub fn from_position(target: Vector3, pos: Vector3) -> Self {
         let (yaw, pitch, r) = cart_to_sph(pos, target);
-        Self { yaw, pitch, radius: r, target, spin: false }
+        Self { yaw, pitch, radius: r, target, spin: false, min_radius: 1.0 }
     }
 
     pub fn position(&self) -> Vector3 {
@@ -25,12 +26,11 @@ impl LightRig {
         self.yaw = yaw; self.pitch = pitch; self.radius = r;
     }
 
-    /// Actualiza con teclado:
     /// J/L: yaw, I/K: pitch, U/O: radio, P: spin toggle, T: reset
     pub fn update_input(&mut self, rl: &RaylibHandle, dt: f32) {
-        let yaw_speed   = 1.5_f32; // rad/s
-        let pitch_speed = 1.2_f32; // rad/s
-        let r_speed     = 2.0_f32; // unidades/s
+        let yaw_speed   = 1.5_f32;
+        let pitch_speed = 1.2_f32;
+        let r_speed     = 2.0_f32;
 
         if rl.is_key_down(KEY_J) { self.yaw   -= yaw_speed * dt; }
         if rl.is_key_down(KEY_L) { self.yaw   += yaw_speed * dt; }
@@ -43,12 +43,11 @@ impl LightRig {
         if rl.is_key_pressed(KEY_T) {
             self.reset(self.target + Vector3::new(3.0, 4.0, 2.0));
         }
-
         if self.spin { self.yaw += 0.6 * dt; }
 
-        // límites razonables
+        // límites
         self.pitch  = self.pitch.clamp(-1.2, 1.2);
-        self.radius = self.radius.clamp(1.0, 12.0);
+        self.radius = self.radius.clamp(self.min_radius, 50.0); // ← usa min_radius
     }
 }
 
@@ -63,7 +62,7 @@ fn sph_to_cart(yaw: f32, pitch: f32, r: f32, target: Vector3) -> Vector3 {
 fn cart_to_sph(pos: Vector3, target: Vector3) -> (f32, f32, f32) {
     let v = pos - target;
     let r = v.length();
-    let yaw   = v.z.atan2(v.x);      // [-PI, PI]
-    let pitch = (v.y / r).asin();    // [-PI/2, PI/2]
+    let yaw   = v.z.atan2(v.x);
+    let pitch = (v.y / r).asin();
     (yaw, pitch, r)
 }

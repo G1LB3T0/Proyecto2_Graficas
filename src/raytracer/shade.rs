@@ -10,28 +10,29 @@ use super::sample::sample_block_linear_alpha;
 
 #[inline]
 pub fn shade_block(pre: &CamPre, scene: &SceneRT, hit: &Hit, kind: BlockKind) -> Vector3 {
-    let (base_lin, alpha) = sample_block_linear_alpha(&scene.mats, hit.uv, hit.face, kind);
+    let (base_lin, _alpha) = sample_block_linear_alpha(&scene.mats, hit.uv, hit.face, kind);
 
     let n = hit.n.normalized();
     let l = (scene.light_pos - hit.p).normalized();
     let v = (pre.eye - hit.p).normalized();
-    let h = (l + v).normalized();
+    let _h = (l + v).normalized();
 
-    let diff = clamp01(n.dot(l));
-    let spec = clamp01(n.dot(h)).powf(24.0);
+    // ---- Iluminación sin especular (evita el “foco”) ----
+    // Wrap Lambert para suavizar el hotspot del difuso
+    let k_wrap = 0.25; // 0..0.4 aprox. (más alto = más suave)
+    let diff = clamp01((n.dot(l) + k_wrap) / (1.0 + k_wrap));
 
+    // Sombra por oclusión de otros bloques
     let in_shadow = shadow_query(scene, hit.p, n, scene.light_pos);
 
-    let ambient = 0.10;
-    let spec_strength = 0.22;
+    // Un poco más de ambiente para que no se vea apagado
+    let ambient = 0.12;
 
     let mut c = base_lin * ambient;
     if !in_shadow {
-        c += base_lin * diff + Vector3::new(1.0, 1.0, 1.0) * (spec_strength * spec);
+        c += base_lin * diff;
     }
 
-    // Transparencias simples: leaves/agua mezclan con “cielo” en renderer (fog/cielo).
-    // Aquí devolvemos ya en sRGB.
     gamma_encode(c)
 }
 
@@ -39,18 +40,17 @@ pub fn shade_block(pre: &CamPre, scene: &SceneRT, hit: &Hit, kind: BlockKind) ->
 pub fn shade_floor(pre: &CamPre, scene: &SceneRT, hit: &Hit) -> Vector3 {
     let n = hit.n.normalized();
     let l = (scene.light_pos - hit.p).normalized();
-    let v = (pre.eye - hit.p).normalized();
-    let h = (l + v).normalized();
 
-    let diff = clamp01(n.dot(l));
-    let spec = clamp01(n.dot(h)).powf(24.0);
-    let ambient = 0.06;
+    // Misma lógica sin especular
+    let k_wrap = 0.25;
+    let diff = clamp01((n.dot(l) + k_wrap) / (1.0 + k_wrap));
 
     let in_shadow = shadow_query(scene, hit.p, n, scene.light_pos);
 
+    let ambient = 0.10;
     let mut c = scene.floor_color * ambient;
     if !in_shadow {
-        c += scene.floor_color * diff + Vector3::new(1.0, 1.0, 1.0) * 0.15 * spec;
+        c += scene.floor_color * diff;
     }
     gamma_encode(c)
 }
@@ -71,7 +71,7 @@ pub fn shadow_query(scene: &SceneRT, p: Vector3, n: Vector3, light_pos: Vector3)
                         let (_c, a) = sample_block_linear_alpha(&scene.mats, h.uv, h.face, b.kind);
                         if a >= 0.1 { return true; }
                     }
-                    BlockKind::Water => { /* no bloquear sombra por simplicidad */ }
+                    BlockKind::Water => { /* no bloquea sombra */ }
                     _ => return true,
                 }
             }
