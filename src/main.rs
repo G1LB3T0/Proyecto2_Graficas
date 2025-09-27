@@ -20,6 +20,7 @@ fn main() {
         .build();
     rl.set_target_fps(60);
 
+    // Resolución del render (F1 alterna entre 1/2 y 1x)
     let mut half_res = true;
 
     // --------- CARGA MATERIALES ----------
@@ -48,7 +49,8 @@ fn main() {
     let mut scene = SceneRT {
         cam,
         light_pos: Vector3::new(3.0, 4.0, 2.0),
-        floor_color: Vector3::new(0.06, 0.07, 0.08),
+        floor_color: Vector3::new(0.06, 0.07, 0.08), // ignorado si show_floor=false
+        show_floor: false,                            // ← piso desactivado
         blocks,
         mats,
     };
@@ -57,19 +59,22 @@ fn main() {
     let mut light_rig = LightRig::from_position(Vector3::new(0.0, 0.5, 0.0), scene.light_pos);
     let mut hud = Hud::new();
 
-    // Texture destino
+    // Texture destino donde subiremos el render de CPU
     let (mut tex_w, mut tex_h) = if half_res { (640, 360) } else { (1280, 720) };
     let mut rimg = Image::gen_image_color(tex_w, tex_h, Color::BLACK);
     let mut rtex = rl.load_texture_from_image(&thread, &rimg).unwrap();
 
     while !rl.window_should_close() {
-        // INPUT
+        // ---- INPUT ----
         scene.cam.apply_input(&rl);
         hud.update_input(&rl);
+
+        // Luz: rotación/orbita
         let dt = rl.get_frame_time();
         light_rig.update_input(&rl, dt);
         scene.light_pos = light_rig.position();
 
+        // Resolución
         if rl.is_key_pressed(KeyboardKey::KEY_F1) {
             half_res = !half_res;
             (tex_w, tex_h) = if half_res { (640, 360) } else { (1280, 720) };
@@ -77,24 +82,31 @@ fn main() {
             rtex = rl.load_texture_from_image(&thread, &rimg).unwrap();
         }
 
-        // RENDER
+        // ---- RENDER CPU (multihilo) ----
         let img = raytracer::render_mt(&scene, tex_w as u32, tex_h as u32);
+
+        // Subir al Texture2D (tu build usa 1 argumento; maneja Result)
         if let Err(e) = rtex.update_texture(img.as_raw()) {
             eprintln!("update_texture error: {e:?}");
         }
 
-        // ESCALA + ASPECT
+        // ---- ESCALA Y ASPECT (antes de begin_drawing) ----
         let sw: f32 = rl.get_screen_width()  as f32;
         let sh: f32 = rl.get_screen_height() as f32;
         let sx: f32 = sw / tex_w as f32;
         let sy: f32 = sh / tex_h as f32;
         let scale: f32 = sx.min(sy);
+
+        // Mantén la cámara con aspect correcto del viewport
         scene.cam.aspect = sw / sh;
 
-        // DRAW
+        // ---- DRAW ----
         let mut d = rl.begin_drawing(&thread);
         d.clear_background(Color::RAYWHITE);
+
         d.draw_texture_ex(&rtex, Vector2::new(0.0, 0.0), 0.0, scale, Color::WHITE);
+
+        // HUD (toggle con H si tu hud.rs lo soporta)
         hud.draw(&mut d);
     }
 }
