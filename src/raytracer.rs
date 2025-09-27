@@ -1,22 +1,19 @@
 use std::thread;
-
 use raylib::core::math::Vector3;
 use image::{RgbaImage, Rgba};
 
 use crate::camera::OrbitCamRT;
 use crate::geometry::{Ray, Hit, hit_plane_y0, hit_aabb};
+use crate::world::{Block, BlockKind, Materials};
 
-/// Escena: cubo con 3 texturas (top/side/bottom) + luz puntual
+/// Escena completa
 #[derive(Clone)]
 pub struct SceneRT {
     pub cam: OrbitCamRT,
     pub light_pos: Vector3,
-    pub floor_color: Vector3,   // en lineal (0..1)
-    pub cube_center: Vector3,
-    pub cube_half: f32,
-    pub tex_top: RgbaImage,     // +Y
-    pub tex_side: RgbaImage,    // lados
-    pub tex_bottom: RgbaImage,  // -Y
+    pub floor_color: Vector3,   // lineal 0..1
+    pub blocks: Vec<Block>,
+    pub mats: Materials,
 }
 
 // ===================== [ color utils ] =====================
@@ -24,7 +21,6 @@ pub struct SceneRT {
 
 #[inline]
 fn srgb_to_linear(c: Vector3) -> Vector3 {
-    // Aproximación rápida (pow 2.2). Suficiente para game look.
     Vector3::new(c.x.powf(2.2), c.y.powf(2.2), c.z.powf(2.2))
 }
 
@@ -33,7 +29,10 @@ fn gamma_encode(c: Vector3) -> Vector3 {
     Vector3::new(c.x.powf(1.0/2.2), c.y.powf(1.0/2.2), c.z.powf(1.0/2.2))
 }
 
-// ===================== [ cámara: precómputo ] =====================
+#[inline]
+fn sky_bg() -> Vector3 { Vector3::new(0.05, 0.07, 0.1) } // “cielo” simple
+
+// ===================== [ cámara precómputo ] =====================
 #[derive(Clone, Copy)]
 struct CamPre {
     eye: Vector3,
@@ -62,35 +61,41 @@ fn primary_dir(pre: &CamPre, x: u32, y: u32, w: u32, h: u32) -> Vector3 {
     (pre.fwd + pre.right.scale_by(px) + pre.up.scale_by(py)).normalized()
 }
 
-// ===================== [ texturas ] =====================
+// ===================== [ texturas y alpha ] =====================
 #[inline]
-fn sample_texture_linear(tex: &RgbaImage, uv: [f32; 2]) -> Vector3 {
-    let u = uv[0] - uv[0].floor();   // wrap
+fn sample_texture_linear_alpha(tex: &RgbaImage, uv: [f32; 2]) -> (Vector3, f32) {
+    let u = uv[0] - uv[0].floor();
     let v = uv[1] - uv[1].floor();
     let x = (u * (tex.width()  as f32 - 1.0)).round() as u32;
     let y = ((1.0 - v) * (tex.height() as f32 - 1.0)).round() as u32;
     let p = tex.get_pixel(x, y);
     let srgb = Vector3::new(p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0);
-    srgb_to_linear(srgb)
+    let a = p[3] as f32 / 255.0;
+    (srgb_to_linear(srgb), a)
 }
 
 #[inline]
-fn sample_block_by_face_linear(scene: &SceneRT, uv: [f32; 2], face: u8) -> Vector3 {
-    match face {
-        3 => sample_texture_linear(&scene.tex_top, uv),     // +Y (top)
-        2 => sample_texture_linear(&scene.tex_bottom, uv),  // -Y (bottom)
-        _ => sample_texture_linear(&scene.tex_side, uv),    // lados
+fn sample_block_linear_alpha(mats: &Materials, uv: [f32; 2], face: u8, kind: BlockKind) -> (Vector3, f32) {
+    match kind {
+        BlockKind::Grass => {
+            if face == 3 { sample_texture_linear_alpha(&mats.grass_top, uv) }      // +Y
+            else if face == 2 { sample_texture_linear_alpha(&mats.dirt, uv) }      // -Y
+            else { sample_texture_linear_alpha(&mats.grass_side, uv) }             // lados
+        }
+        BlockKind::Dirt   => sample_texture_linear_alpha(&mats.dirt,      uv),
+        BlockKind::Stone  => sample_texture_linear_alpha(&mats.stone,     uv),
+        BlockKind::Log    => if face == 2 || face == 3 {
+                                sample_texture_linear_alpha(&mats.log_top,  uv)
+                             } else { sample_texture_linear_alpha(&mats.log_side, uv) },
+        BlockKind::Leaves => sample_texture_linear_alpha(&mats.leaves,    uv),     // tiene alpha
+        BlockKind::Water  => sample_texture_linear_alpha(&mats.water,     uv),     // tiene alpha
     }
 }
 
 // ===================== [ sombreado ] =====================
 #[inline]
-fn shade_pre(scene: &SceneRT, pre: &CamPre, hit: &Hit) -> Vector3 {
-    let base = if hit.id == 1 {
-        sample_block_by_face_linear(scene, hit.uv, hit.face)   // textura ya en lineal
-    } else {
-        scene.floor_color
-    };
+fn shade_block(pre: &CamPre, scene: &SceneRT, hit: &Hit, kind: BlockKind) -> Vector3 {
+    let (base_lin, alpha) = sample_block_linear_alpha(&scene.mats, hit.uv, hit.face, kind);
 
     let n = hit.n.normalized();
     let l = (scene.light_pos - hit.p).normalized();
@@ -98,31 +103,79 @@ fn shade_pre(scene: &SceneRT, pre: &CamPre, hit: &Hit) -> Vector3 {
     let h = (l + v).normalized();
 
     let diff = clamp01(n.dot(l));
-    let spec = clamp01(n.dot(h)).powf(24.0);   // especular más suave para pixel-art
+    let spec = clamp01(n.dot(h)).powf(24.0);
 
-    // Shadow ray (sombra dura)
-    let in_shadow = {
-        let eps = 1e-3;
-        let to_light = scene.light_pos - hit.p;
-        let dist_l = to_light.length();
-        let ray = Ray { o: hit.p + n * eps, d: to_light / dist_l };
-        if let Some(hc) = hit_aabb(ray, scene.cube_center, scene.cube_half) {
-            hc.t < dist_l
-        } else { false }
-    };
+    // Sombras: oclusión por otros bloques (leaves no bloquea si el texel es hueco)
+    let in_shadow = shadow_query(scene, hit.p, n, scene.light_pos);
 
-    // Iluminación
     let ambient = 0.08;
     let spec_strength = 0.25;
 
-    let mut color = base * ambient;
+    let mut c = base_lin * ambient;
     if !in_shadow {
-        color += base * diff + Vector3::new(1.0, 1.0, 1.0) * (spec_strength * spec);
+        c += base_lin * diff + Vector3::new(1.0, 1.0, 1.0) * (spec_strength * spec);
     }
-    gamma_encode(color) // devolver en sRGB para la pantalla
+
+    // Transparencias simples: leaves/agua mezclan con "cielo"
+    match kind {
+        BlockKind::Leaves | BlockKind::Water => {
+            let bg = sky_bg();
+            let a = alpha.clamp(0.0, 1.0);
+            c = bg * (1.0 - a) + c * a;
+        }
+        _ => {}
+    }
+
+    gamma_encode(c)
 }
 
-// ===================== [ render single-thread ] =====================
+// Para piso (id=0) y fondo
+#[inline]
+fn shade_floor(pre: &CamPre, scene: &SceneRT, hit: &Hit) -> Vector3 {
+    let n = hit.n.normalized();
+    let l = (scene.light_pos - hit.p).normalized();
+    let v = (pre.eye - hit.p).normalized();
+    let h = (l + v).normalized();
+
+    let diff = clamp01(n.dot(l));
+    let spec = clamp01(n.dot(h)).powf(24.0);
+    let ambient = 0.06;
+
+    let in_shadow = shadow_query(scene, hit.p, n, scene.light_pos);
+
+    let mut c = scene.floor_color * ambient;
+    if !in_shadow {
+        c += scene.floor_color * diff + Vector3::new(1.0, 1.0, 1.0) * 0.15 * spec;
+    }
+    gamma_encode(c)
+}
+
+// Consulta de sombras contra TODOS los bloques (alpha-cutout para leaves)
+fn shadow_query(scene: &SceneRT, p: Vector3, n: Vector3, light_pos: Vector3) -> bool {
+    let eps = 1e-3;
+    let to_light = light_pos - p;
+    let dist_l = to_light.length();
+    let ray = Ray { o: p + n * eps, d: to_light / dist_l };
+
+    for b in &scene.blocks {
+        if let Some(h) = hit_aabb(ray, b.center, b.half) {
+            if h.t < dist_l {
+                // leaves no bloquea si el texel es agujero; water no bloquea (simple)
+                match b.kind {
+                    BlockKind::Leaves => {
+                        let (_c, a) = sample_block_linear_alpha(&scene.mats, h.uv, h.face, b.kind);
+                        if a >= 0.1 { return true; }
+                    }
+                    BlockKind::Water => { /* puedes decidir que sí/ no bloquee; de momento no */ }
+                    _ => return true,
+                }
+            }
+        }
+    }
+    false
+}
+
+// ===================== [ renderers ] =====================
 pub fn render(scene: &SceneRT, w: u32, h: u32) -> RgbaImage {
     let pre = cam_precompute(&scene.cam);
     let mut img = RgbaImage::new(w, h);
@@ -133,25 +186,37 @@ pub fn render(scene: &SceneRT, w: u32, h: u32) -> RgbaImage {
             let ray = Ray { o: pre.eye, d: dir };
 
             let mut best = Hit::none();
-            if let Some(hp) = hit_plane_y0(ray) { if hp.t < best.t { best = hp; } }
-            if let Some(hc) = hit_aabb(ray, scene.cube_center, scene.cube_half) { if hc.t < best.t { best = hc; } }
+            let mut best_kind: Option<BlockKind> = None;
+
+            if let Some(hp) = hit_plane_y0(ray) { if hp.t < best.t { best = hp; best_kind = None; } }
+
+            for b in &scene.blocks {
+                if let Some(hc) = hit_aabb(ray, b.center, b.half) {
+                    // Cutout de leaves: si el texel es "agujero", ignora este hit
+                    if matches!(b.kind, BlockKind::Leaves) {
+                        let (_c, a) = sample_block_linear_alpha(&scene.mats, hc.uv, hc.face, b.kind);
+                        if a < 0.1 { continue; }
+                    }
+                    if hc.t < best.t {
+                        best = hc; best_kind = Some(b.kind);
+                    }
+                }
+            }
 
             let col = if best.id >= 0 {
-                shade_pre(scene, &pre, &best)
+                if let Some(k) = best_kind { shade_block(&pre, scene, &best, k) }
+                else { shade_floor(&pre, scene, &best) }
             } else {
-                Vector3::new(0.05, 0.07, 0.1) // fondo en sRGB
+                sky_bg() // fondo
             };
 
-            let r=(clamp01(col.x)*255.0) as u8;
-            let g=(clamp01(col.y)*255.0) as u8;
-            let b=(clamp01(col.z)*255.0) as u8;
+            let r=(clamp01(col.x)*255.0) as u8; let g=(clamp01(col.y)*255.0) as u8; let b=(clamp01(col.z)*255.0) as u8;
             img.put_pixel(x, y, Rgba([r,g,b,255]));
         }
     }
     img
 }
 
-// ===================== [ render multihilo ] =====================
 pub fn render_mt(scene: &SceneRT, w: u32, h: u32) -> RgbaImage {
     let pre = cam_precompute(&scene.cam);
 
@@ -175,18 +240,27 @@ pub fn render_mt(scene: &SceneRT, w: u32, h: u32) -> RgbaImage {
                     let ray = Ray { o: pre.eye, d: dir };
 
                     let mut best = Hit::none();
-                    if let Some(hp) = hit_plane_y0(ray) { if hp.t < best.t { best = hp; } }
-                    if let Some(hc) = hit_aabb(ray, sc.cube_center, sc.cube_half) { if hc.t < best.t { best = hc; } }
+                    let mut best_kind: Option<BlockKind> = None;
+
+                    if let Some(hp) = hit_plane_y0(ray) { if hp.t < best.t { best = hp; best_kind = None; } }
+                    for b in &sc.blocks {
+                        if let Some(hc) = hit_aabb(ray, b.center, b.half) {
+                            if matches!(b.kind, BlockKind::Leaves) {
+                                let (_c, a) = sample_block_linear_alpha(&sc.mats, hc.uv, hc.face, b.kind);
+                                if a < 0.1 { continue; }
+                            }
+                            if hc.t < best.t { best = hc; best_kind = Some(b.kind); }
+                        }
+                    }
 
                     let col = if best.id >= 0 {
-                        shade_pre(&sc, &pre, &best)
+                        if let Some(k) = best_kind { shade_block(&pre, &sc, &best, k) }
+                        else { shade_floor(&pre, &sc, &best) }
                     } else {
-                        Vector3::new(0.05, 0.07, 0.1)
+                        sky_bg()
                     };
 
-                    let r=(clamp01(col.x)*255.0) as u8;
-                    let g=(clamp01(col.y)*255.0) as u8;
-                    let b=(clamp01(col.z)*255.0) as u8;
+                    let r=(clamp01(col.x)*255.0) as u8; let g=(clamp01(col.y)*255.0) as u8; let b=(clamp01(col.z)*255.0) as u8;
                     strip.put_pixel(x, y - y0, Rgba([r,g,b,255]));
                 }
             }
