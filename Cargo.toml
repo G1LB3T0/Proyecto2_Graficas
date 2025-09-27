@@ -1,0 +1,8 @@
+[package]
+name = "Proyecto_2"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+image = "0.25.8"
+raylib = "5.5.1"
