@@ -7,7 +7,7 @@ mod hud;
 
 use raylib::prelude::*;
 use camera::OrbitCamRT;
-use raytracer::SceneRT;
+use raytracer::{SceneRT, WaterMode};
 use light::LightRig;
 
 fn main() {
@@ -46,10 +46,9 @@ fn main() {
     }
 
     // === Posición inicial de la isla (auto) ===
-    // Mueve la isla para que el "techo" (capa superior) quede a ~1.2 en Y
-    let (mut min_y, mut max_y) = (f32::INFINITY, -f32::INFINITY);
+    let (mut _min_y, mut max_y) = (f32::INFINITY, -f32::INFINITY);
     for b in &blocks {
-        min_y = min_y.min(b.center.y);
+        _min_y = _min_y.min(b.center.y);
         max_y = max_y.max(b.center.y);
     }
     let target_top_y: f32 = 1.2;
@@ -65,13 +64,12 @@ fn main() {
         show_floor: false,                           // piso oculto
         blocks,
         mats,
+        water_mode: WaterMode::SkyOnly,              // ← default rápido
     };
 
     // -------- Luz orbital y HUD --------
     let mut light_rig = LightRig::from_position(Vector3::new(0.0, 0.5, 0.0), scene.light_pos);
     light_rig.min_radius = world::suggest_min_light_radius(16, 16, &scene.blocks);
-
-
 
     let mut hud = hud::Hud::new();
 
@@ -104,7 +102,6 @@ fn main() {
             world::translate_blocks_y(&mut scene.blocks, dy); moved = true;
         }
         if rl.is_key_pressed(KeyboardKey::KEY_C) {
-            // Recalcula altura actual y resetea a target_top_y
             let mut maxy = -f32::INFINITY;
             for b in &scene.blocks { maxy = maxy.max(b.center.y); }
             let dy = target_top_y - maxy;
@@ -115,9 +112,7 @@ fn main() {
             }
         }
         if moved {
-            // Ajusta radio mínimo de la luz según nueva altura
             light_rig.min_radius = world::suggest_min_light_radius(16, 16, &scene.blocks);
-
         }
 
         // Toggle resolución
@@ -126,6 +121,15 @@ fn main() {
             (tex_w, tex_h) = if half_res { (640, 360) } else { (1280, 720) };
             rimg = Image::gen_image_color(tex_w, tex_h, Color::BLACK);
             rtex = rl.load_texture_from_image(&thread, &rimg).unwrap();
+        }
+
+        // Toggle modo agua (F6)
+        if rl.is_key_pressed(KeyboardKey::KEY_F6) {
+            scene.water_mode = match scene.water_mode {
+                WaterMode::Off => WaterMode::SkyOnly,
+                WaterMode::SkyOnly => WaterMode::ReflectOnce,
+                WaterMode::ReflectOnce => WaterMode::Off,
+            };
         }
 
         // ---- RENDER CPU (multihilo) ----
@@ -150,8 +154,17 @@ fn main() {
         let mut d = rl.begin_drawing(&thread);
         d.clear_background(Color::RAYWHITE);
         d.draw_texture_ex(&rtex, Vector2::new(0.0, 0.0), 0.0, scale, Color::WHITE);
+
+        // HUD + info agua
         hud.draw(&mut d);
-        d.draw_text("Z/X: bajar/subir isla | C: reset altura", 10, 30, 18, Color::RED);
+        let mode_str = match scene.water_mode {
+            WaterMode::Off => "Water: OFF",
+            WaterMode::SkyOnly => "Water: SkyOnly (fast)",
+            WaterMode::ReflectOnce => "Water: ReflectOnce (slower)",
+        };
+        d.draw_text(mode_str, 10, 52, 18, Color::BLUE);
+        d.draw_text("F6: toggle water reflections", 10, 72, 18, Color::DARKBLUE);
+        d.draw_text("Z/X: bajar/subir isla | C: reset altura", 10, 92, 18, Color::DARKGRAY);
         d.draw_fps(10, 10);
     }
 }
