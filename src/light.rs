@@ -8,7 +8,7 @@ pub struct LightRig {
     pub radius: f32,
     pub target: Vector3,
     pub spin: bool,
-    pub min_radius: f32, // ← campo público para fijar radio mínimo
+    pub min_radius: f32, // radio mínimo para que la luz no entre al mundo
 }
 
 impl LightRig {
@@ -24,6 +24,15 @@ impl LightRig {
     pub fn reset(&mut self, pos: Vector3) {
         let (yaw, pitch, r) = cart_to_sph(pos, self.target);
         self.yaw = yaw; self.pitch = pitch; self.radius = r;
+    }
+
+    /// Setter para que puedas llamar `set_min_radius(...)` desde main.rs
+    pub fn set_min_radius(&mut self, r: f32) {
+        self.min_radius = r.max(0.1);
+        // si el radio actual es menor que el mínimo, súbelo
+        if self.radius < self.min_radius {
+            self.radius = self.min_radius;
+        }
     }
 
     /// J/L: yaw, I/K: pitch, U/O: radio, P: spin toggle, T: reset
@@ -47,7 +56,7 @@ impl LightRig {
 
         // límites
         self.pitch  = self.pitch.clamp(-1.2, 1.2);
-        self.radius = self.radius.clamp(self.min_radius, 50.0); // ← usa min_radius
+        self.radius = self.radius.clamp(self.min_radius, 50.0);
     }
 }
 

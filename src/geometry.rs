@@ -69,33 +69,47 @@ pub fn hit_aabb(ray: Ray, c: Vector3, he: f32) -> Option<Hit> {
     let p = ray.o + ray.d * t;
 
     let eps = 1e-3;
-    let (mut n, mut uv, mut face) = (Vector3::new(0.0, 1.0, 0.0), [0.0, 0.0], 5u8);
+    let (mut n, mut face) = (Vector3::new(0.0, 1.0, 0.0), 5u8);
 
     if (p.x - min.x).abs() < eps {
         n = Vector3::new(-1.0, 0.0, 0.0);
-        uv = [(p.z - min.z)/(max.z-min.z), (p.y - min.y)/(max.y-min.y)];
         face = 0;
     } else if (p.x - max.x).abs() < eps {
         n = Vector3::new(1.0, 0.0, 0.0);
-        uv = [1.0 - (p.z - min.z)/(max.z-min.z), (p.y - min.y)/(max.y-min.y)];
         face = 1;
     } else if (p.y - min.y).abs() < eps {
         n = Vector3::new(0.0, -1.0, 0.0);
-        uv = [(p.x - min.x)/(max.x-min.x), (p.z - min.z)/(max.z-min.z)];
         face = 2;
     } else if (p.y - max.y).abs() < eps {
         n = Vector3::new(0.0, 1.0, 0.0);
-        uv = [(p.x - min.x)/(max.x-min.x), 1.0 - (p.z - min.z)/(max.z-min.z)];
         face = 3;
     } else if (p.z - min.z).abs() < eps {
         n = Vector3::new(0.0, 0.0, -1.0);
-        uv = [1.0 - (p.x - min.x)/(max.x-min.x), (p.y - min.y)/(max.y-min.y)];
         face = 4;
     } else if (p.z - max.z).abs() < eps {
         n = Vector3::new(0.0, 0.0, 1.0);
-        uv = [(p.x - min.x)/(max.x-min.x), (p.y - min.y)/(max.y-min.y)];
         face = 5;
     }
+
+    // Coordenadas normalizadas s para el cálculo de UV
+    let s = Vector3::new(
+        (p.x - min.x) / (max.x - min.x),
+        (p.y - min.y) / (max.y - min.y),
+        (p.z - min.z) / (max.z - min.z),
+    );
+
+    let uv = match face {
+        // LADOS: v = s.y (↑)
+        0 => [1.0 - s.z, s.y], // -X
+        1 => [s.z,       s.y], // +X
+        // TOP/BOTTOM (igual que antes)
+        2 => [s.x,       s.z      ], // -Y  (bottom)
+        3 => [s.x,       1.0 - s.z], // +Y  (top)
+        // LADOS Z: v = s.y (↑)
+        4 => [s.x,       s.y],      // -Z
+        5 => [1.0 - s.x, s.y],      // +Z
+        _ => [0.0, 0.0],
+    };
 
     Some(Hit { t, p, n, uv, id: 1, face })
 }
