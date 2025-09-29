@@ -27,7 +27,7 @@ fn calculate_lamp_light(scene: &SceneRT, hit_pos: Vector3, normal: Vector3) -> V
 
     let mut total_light = Vector3::new(0.0, 0.0, 0.0);
     let lamp_range = 8.0; // Rango de iluminación de las lámparas
-    let lamp_intensity = 0.8; // Intensidad de las lámparas
+    let lamp_intensity = 3.0; // Intensidad aumentada de las lámparas
 
     // Buscar lámparas cercanas
     for block in &scene.blocks {
@@ -69,9 +69,15 @@ pub fn shade_block(pre: &CamPre, scene: &SceneRT, hit: &Hit, kind: BlockKind) ->
 
     let in_shadow = shadow_query_fast(scene, hit.p, n);
 
-    let ambient = 0.12;
+    // Iluminación diferente para día y noche
+    let (ambient, sun_intensity) = if scene.is_night {
+        (0.03, 0.1)  // Muy poca luz ambiental y del sol durante la noche
+    } else {
+        (0.12, 1.0)  // Iluminación normal durante el día
+    };
+    
     let mut c_lin = base_lin * ambient;
-    if !in_shadow { c_lin += base_lin * diff; }
+    if !in_shadow { c_lin += base_lin * (diff * sun_intensity); }
     
     // Agregar luz de lámparas (solo de noche)
     let lamp_light = calculate_lamp_light(scene, hit.p, n);
