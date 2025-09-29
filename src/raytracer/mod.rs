@@ -21,7 +21,8 @@ pub struct SceneRT {
     pub show_floor: bool,
     pub blocks: Vec<Block>,
     pub mats: Materials,
-    pub water_mode: WaterMode,  // ← nuevo
+    pub water_mode: WaterMode,
+    pub is_night: bool,         // nuevo: modo día/noche
 }
 
 pub mod color;

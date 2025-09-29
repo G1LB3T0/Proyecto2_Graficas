@@ -2,6 +2,7 @@ use raylib::core::math::Vector3;
 use image::RgbaImage;
 
 use crate::world::{Materials, BlockKind};
+use crate::raytracer::SceneRT;  // necesitamos acceso a la escena para el modo noche
 use super::color::srgb_to_linear;
 
 #[inline]
@@ -18,7 +19,7 @@ pub fn sample_texture_linear_alpha(tex: &RgbaImage, uv: [f32; 2]) -> (Vector3, f
 
 #[inline]
 pub fn sample_block_linear_alpha(
-    mats: &Materials, uv: [f32; 2], face: u8, kind: BlockKind
+    mats: &Materials, uv: [f32; 2], face: u8, kind: BlockKind, is_night: bool
 ) -> (Vector3, f32) {
     match kind {
         BlockKind::Grass => {
@@ -35,5 +36,12 @@ pub fn sample_block_linear_alpha(
                              },
         BlockKind::Leaves => sample_texture_linear_alpha(&mats.leaves,    uv), // alpha
         BlockKind::Water  => sample_texture_linear_alpha(&mats.water,     uv), // alpha
+        BlockKind::Lamp   => {
+            if is_night {
+                sample_texture_linear_alpha(&mats.lamp_on,  uv)  // lámpara encendida de noche
+            } else {
+                sample_texture_linear_alpha(&mats.lamp_off, uv)  // lámpara apagada de día
+            }
+        }
     }
 }

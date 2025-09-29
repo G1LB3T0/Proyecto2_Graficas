@@ -43,6 +43,8 @@ fn main() {
         log_top:    image::open("assets/log_top.png").expect("Falta assets/log_top.png").to_rgba8(),
         leaves:     image::open("assets/leaves.png").expect("Falta assets/leaves.png").to_rgba8(),
         water:      image::open("assets/water.png").expect("Falta assets/water.png").to_rgba8(),
+        lamp_off:   image::open("assets/lamp_off.png").expect("Falta assets/lamp_off.png").to_rgba8(),
+        lamp_on:    image::open("assets/lamp_on.png").expect("Falta assets/lamp_on.png").to_rgba8(),
     };
 
     // -------- capas -> bloques --------
@@ -75,6 +77,7 @@ fn main() {
         blocks,
         mats,
         water_mode: WaterMode::Off,  // cambiar a Off para mejor rendimiento inicial
+        is_night: false,  // empezar en modo día
     };
 
     // -------- LUZ + HUD --------
@@ -93,6 +96,7 @@ fn main() {
     let mut last_target = scene.cam.target;
     let mut last_light  = scene.light_pos;
     let mut last_mode   = scene.water_mode;
+    let mut last_is_night = scene.is_night;  // nuevo cache para día/noche
     let mut last_wh     = (tex_w, tex_h);
     let mut rtex_has_image = false;
     let mut frame_skip_counter = 0u32;  // contador para skipping de frames
@@ -155,6 +159,10 @@ fn main() {
                 WaterMode::ReflectOnce => WaterMode::Off,
             };
         }
+        // Nuevo: Toggle día/noche con F5
+        if rl.is_key_pressed(KeyboardKey::KEY_F5) {
+            scene.is_night = !scene.is_night;
+        }
 
         // mantener aspect
         let sw_i: i32 = rl.get_screen_width();
@@ -178,7 +186,8 @@ fn main() {
         let light_changed = !v_eq(scene.light_pos, last_light, eps);
         let wh_changed    = last_wh != (tex_w, tex_h);
         let mode_changed  = !water_mode_eq(last_mode, scene.water_mode);
-        let dirty = cam_changed || light_changed || moved_blocks || wh_changed || mode_changed || !rtex_has_image;
+        let night_changed = last_is_night != scene.is_night;  // detectar cambio día/noche
+        let dirty = cam_changed || light_changed || moved_blocks || wh_changed || mode_changed || night_changed || !rtex_has_image;
         
         // Frame skipping para mejor rendimiento - renderizar solo cada pocos frames si no hay cambios grandes
         frame_skip_counter += 1;
@@ -188,7 +197,7 @@ fn main() {
             let img = raytracer::render_mt(&scene, tex_w as u32, tex_h as u32);
             let _ = rtex.update_texture(img.as_raw());
             rtex_has_image = true;
-            last_eye = eye; last_target = tgt; last_light = scene.light_pos; last_wh = (tex_w, tex_h); last_mode = scene.water_mode;
+            last_eye = eye; last_target = tgt; last_light = scene.light_pos; last_wh = (tex_w, tex_h); last_mode = scene.water_mode; last_is_night = scene.is_night;
             frame_skip_counter = 0;  // reset counter después de renderizar
         }
 
@@ -205,13 +214,15 @@ fn main() {
         hud.line_col_size(format!("{} FPS", fps), Color::RED, 24);
         let res_label = if half_res { "Low (F1)" } else { "Med (F1)" };  // actualizar labels
         hud.line(format!("RT Res: {}x{}  {}", tex_w, tex_h, res_label));
+        let day_night_str = if scene.is_night { "Night Mode (F5)" } else { "Day Mode (F5)" };
+        hud.line(day_night_str);
         let mode_str = match scene.water_mode {
             WaterMode::Off => "Water: OFF",
             WaterMode::SkyOnly => "Water: SkyOnly (fast)",
             WaterMode::ReflectOnce => "Water: ReflectOnce (slower)",
         };
         hud.line(mode_str);
-        hud.line("F6: toggle water reflections");
+        hud.line("F5: día/noche  |  F6: toggle water reflections");
         hud.line("Mouse L drag: orbit  |  Wheel: zoom  |  R: reset cámara");
         hud.line("J/L yaw luz  |  I/K pitch  |  U/O radio  |  P spin  |  T reset luz");
         hud.line("Z/X bajar/subir isla  |  C reset altura  |  H mostrar/ocultar HUD");

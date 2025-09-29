@@ -20,7 +20,7 @@ use super::fog::sky_srgb;
 #[inline] fn fresnel_schlick(cos_theta: f32, f0: f32) -> f32 { f0 + (1.0 - f0) * (1.0 - cos_theta).powf(5.0) }
 
 pub fn shade_block(pre: &CamPre, scene: &SceneRT, hit: &Hit, kind: BlockKind) -> Vector3 {
-    let (base_lin, alpha) = sample_block_linear_alpha(&scene.mats, hit.uv, hit.face, kind);
+    let (base_lin, alpha) = sample_block_linear_alpha(&scene.mats, hit.uv, hit.face, kind, scene.is_night);
 
     let n = hit.n.normalized();
     let l = (scene.light_pos - hit.p).normalized();
@@ -81,11 +81,11 @@ fn trace_reflect_once(pre:&CamPre, scene:&SceneRT, origin:Vector3, dir:Vector3) 
 struct GridLite { w:i32,h:i32,d:i32, min:Vector3, data:Vec<u8> }
 #[inline] fn kind_to_u8(k: BlockKind) -> u8 {
     match k { BlockKind::Grass=>1, BlockKind::Dirt=>2, BlockKind::Stone=>3,
-              BlockKind::Log=>4, BlockKind::Leaves=>5, BlockKind::Water=>6 }
+              BlockKind::Log=>4, BlockKind::Leaves=>5, BlockKind::Water=>6, BlockKind::Lamp=>7 }
 }
 #[inline] fn u8_to_kind(v: u8) -> Option<BlockKind> {
     match v {1=>Some(BlockKind::Grass),2=>Some(BlockKind::Dirt),3=>Some(BlockKind::Stone),
-             4=>Some(BlockKind::Log),5=>Some(BlockKind::Leaves),6=>Some(BlockKind::Water),_=>None}
+             4=>Some(BlockKind::Log),5=>Some(BlockKind::Leaves),6=>Some(BlockKind::Water),7=>Some(BlockKind::Lamp),_=>None}
 }
 #[inline] fn gidx(g:&GridLite,x:i32,y:i32,z:i32)->usize {
     (y as usize)*(g.w as usize)*(g.d as usize) + (z as usize)*(g.w as usize) + (x as usize)
@@ -166,7 +166,7 @@ fn first_hit_fast(scene:&SceneRT, o:Vector3, d:Vector3) -> Option<(Hit, BlockKin
                 };
 
                 if matches!(kind, BlockKind::Leaves) {
-                    let (_c,a)=sample_block_linear_alpha(&scene.mats,uv,face,kind);
+                    let (_c,a)=sample_block_linear_alpha(&scene.mats,uv,face,kind,scene.is_night);
                     if a < 0.1 { /* continúa */ } else {
                         let hit=Hit{id:1,t,p,n,uv,face}; return Some((hit,kind));
                     }
@@ -196,7 +196,7 @@ pub fn shadow_query_fast(scene:&SceneRT, p:Vector3, n:Vector3) -> bool {
             return match kind {
                 BlockKind::Leaves => {
                     // dither estable por texel para penumbra
-                    let (_c,a)=sample_block_linear_alpha(&scene.mats, hit.uv, hit.face, kind);
+                    let (_c,a)=sample_block_linear_alpha(&scene.mats, hit.uv, hit.face, kind, scene.is_night);
                     let m = hash01(hit.uv[0]*64.0, hit.uv[1]*64.0, hit.face as f32);
                     a > m
                 }

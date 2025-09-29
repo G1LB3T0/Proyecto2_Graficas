@@ -28,6 +28,7 @@ struct Grid {
         BlockKind::Log   => 4,
         BlockKind::Leaves=> 5,
         BlockKind::Water => 6,
+        BlockKind::Lamp  => 7,
     }
 }
 #[inline] fn u8_to_kind(v: u8) -> Option<BlockKind> {
@@ -38,6 +39,7 @@ struct Grid {
         4 => Some(BlockKind::Log),
         5 => Some(BlockKind::Leaves),
         6 => Some(BlockKind::Water),
+        7 => Some(BlockKind::Lamp),
         _ => None,
     }
 }
@@ -94,7 +96,7 @@ struct DdaHit {
     t: f32, p: Vector3, face: u8, n: Vector3, uv: [f32;2], kind: BlockKind
 }
 
-fn trace_grid_first(o:Vector3, d:Vector3, g:&Grid, mats:&crate::world::Materials) -> Option<DdaHit> {
+fn trace_grid_first(o:Vector3, d:Vector3, g:&Grid, mats:&crate::world::Materials, is_night: bool) -> Option<DdaHit> {
     let max = g.min + Vector3::new(g.w as f32, g.h as f32, g.d as f32);
     let (mut t, tmax_all) = ray_aabb(o,d,g.min,max)?;
     // punto de entrada
@@ -182,7 +184,7 @@ fn trace_grid_first(o:Vector3, d:Vector3, g:&Grid, mats:&crate::world::Materials
 
                 // Cutout de hojas: si alpha baja, sigue el DDA (no es hit sólido)
                 if let BlockKind::Leaves = kind {
-                    let (_c, a) = sample_block_linear_alpha(mats, uv, f, kind);
+                    let (_c, a) = sample_block_linear_alpha(mats, uv, f, kind, is_night);
                     if a < 0.1 { /* pasa luz/visión */ }
                     else {
                         return Some(DdaHit{ t, p, face:f, n, uv, kind });
@@ -222,7 +224,7 @@ pub fn render(scene: &SceneRT, w: u32, h: u32) -> RgbaImage {
         for x in 0..w {
             let dir = primary_dir(&pre, x, y, w, h);
 
-            let col = if let Some(hh) = trace_grid_first(pre.eye, dir, &grid, &scene.mats) {
+            let col = if let Some(hh) = trace_grid_first(pre.eye, dir, &grid, &scene.mats, scene.is_night) {
                 // Adaptar a Hit y sombrear
                 let hit = Hit { id:1, t:hh.t, p:hh.p, n:hh.n, uv:hh.uv, face:hh.face };
                 shade_block(&pre, scene, &hit, hh.kind)
@@ -266,7 +268,7 @@ pub fn render_mt(scene: &SceneRT, w: u32, h: u32) -> RgbaImage {
                 for x in 0..w {
                     let dir = super::cam::primary_dir(&pre, x, y, w, h);
 
-                    let col = if let Some(hh) = trace_grid_first(pre.eye, dir, &g, &sc.mats) {
+                    let col = if let Some(hh) = trace_grid_first(pre.eye, dir, &g, &sc.mats, sc.is_night) {
                         let hit = Hit { id:1, t:hh.t, p:hh.p, n:hh.n, uv:hh.uv, face:hh.face };
                         super::shade::shade_block(&pre, &sc, &hit, hh.kind)
                     } else if sc.show_floor {

@@ -4,7 +4,7 @@ use image::RgbaImage;
 
 // ----------- Tipos de bloque / material -----------
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BlockKind { Grass, Dirt, Stone, Log, Leaves, Water }
+pub enum BlockKind { Grass, Dirt, Stone, Log, Leaves, Water, Lamp }
 
 #[derive(Clone, Debug)]
 pub struct Block {
@@ -24,6 +24,8 @@ pub struct Materials {
     pub log_top: RgbaImage,
     pub leaves: RgbaImage,
     pub water: RgbaImage,
+    pub lamp_off: RgbaImage,  // nueva textura
+    pub lamp_on: RgbaImage,   // nueva textura
 }
 
 // ----------- Loader de capas 16x16 ---------------
@@ -130,7 +132,7 @@ fn normalize_to_grid(txt: &str, grid_w: usize, grid_h: usize) -> Vec<Vec<char>> 
 }
 
 fn is_valid_symbol(c: char) -> bool {
-    matches!(c, 'g'|'G'|'d'|'D'|'s'|'S'|'l'|'L'|'v'|'V'|'w'|'W'|'.'|' ')
+    matches!(c, 'g'|'G'|'d'|'D'|'s'|'S'|'l'|'L'|'v'|'V'|'w'|'W'|'p'|'P'|'.'|' ')
 }
 
 fn char_to_kind(c: char) -> Option<BlockKind> {
@@ -141,6 +143,7 @@ fn char_to_kind(c: char) -> Option<BlockKind> {
         'l' | 'L' => Some(BlockKind::Log),
         'v' | 'V' => Some(BlockKind::Leaves),
         'w' | 'W' => Some(BlockKind::Water),
+        'p' | 'P' => Some(BlockKind::Lamp),  // P de "Post" o "Pillar"
         '.' | ' ' => None,
         _ => None,
     }
