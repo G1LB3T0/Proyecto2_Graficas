@@ -120,6 +120,9 @@ fn main() {
                 scene.light_pos = new_light;
             }
 
+            // control del HUD
+            hud.update_input(&rl);
+
             // subir/bajar isla Z/X
             if rl.is_key_pressed(KeyboardKey::KEY_Z) {
                 world::translate_blocks_y(&mut scene.blocks, -0.1);

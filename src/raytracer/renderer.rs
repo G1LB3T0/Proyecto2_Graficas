@@ -230,10 +230,10 @@ pub fn render(scene: &SceneRT, w: u32, h: u32) -> RgbaImage {
                 shade_block(&pre, scene, &hit, hh.kind)
             } else if scene.show_floor {
                 // opcional: piso; por simplicidad lo omitimos del DDA si show_floor=false
-                let bg = sky_srgb(dir);
+                let bg = sky_srgb(dir, scene.is_night);
                 bg
             } else {
-                sky_srgb(dir)
+                sky_srgb(dir, scene.is_night)
             };
 
             let r=(clamp01(col.x)*255.0) as u8;
@@ -272,9 +272,9 @@ pub fn render_mt(scene: &SceneRT, w: u32, h: u32) -> RgbaImage {
                         let hit = Hit { id:1, t:hh.t, p:hh.p, n:hh.n, uv:hh.uv, face:hh.face };
                         super::shade::shade_block(&pre, &sc, &hit, hh.kind)
                     } else if sc.show_floor {
-                        sky_srgb(dir)
+                        sky_srgb(dir, sc.is_night)
                     } else {
-                        sky_srgb(dir)
+                        sky_srgb(dir, sc.is_night)
                     };
 
                     let r=(clamp01(col.x)*255.0) as u8;

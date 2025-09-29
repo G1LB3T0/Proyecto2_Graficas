@@ -19,6 +19,43 @@ use super::fog::sky_srgb;
 #[inline] fn reflect(i: Vector3, n: Vector3) -> Vector3 { i - n * (2.0 * i.dot(n)) }
 #[inline] fn fresnel_schlick(cos_theta: f32, f0: f32) -> f32 { f0 + (1.0 - f0) * (1.0 - cos_theta).powf(5.0) }
 
+/// Calcula iluminación adicional de lámparas cercanas (solo de noche)
+fn calculate_lamp_light(scene: &SceneRT, hit_pos: Vector3, normal: Vector3) -> Vector3 {
+    if !scene.is_night {
+        return Vector3::new(0.0, 0.0, 0.0); // Sin luz de lámparas durante el día
+    }
+
+    let mut total_light = Vector3::new(0.0, 0.0, 0.0);
+    let lamp_range = 8.0; // Rango de iluminación de las lámparas
+    let lamp_intensity = 0.8; // Intensidad de las lámparas
+
+    // Buscar lámparas cercanas
+    for block in &scene.blocks {
+        if let BlockKind::Lamp = block.kind {
+            let lamp_pos = block.center;
+            let to_lamp = lamp_pos - hit_pos;
+            let distance = to_lamp.length();
+            
+            if distance < lamp_range && distance > 0.1 {
+                let lamp_dir = to_lamp.normalized();
+                let attenuation = 1.0 / (1.0 + 0.5 * distance + 0.1 * distance * distance);
+                let dot_factor = normal.dot(lamp_dir).max(0.0);
+                
+                // Color cálido de lámpara (naranja/amarillo)
+                let lamp_color = Vector3::new(1.0, 0.8, 0.4);
+                total_light += lamp_color * (lamp_intensity * attenuation * dot_factor);
+            }
+        }
+    }
+
+    // Manualmente clampar cada componente
+    Vector3::new(
+        total_light.x.clamp(0.0, 1.0),
+        total_light.y.clamp(0.0, 1.0), 
+        total_light.z.clamp(0.0, 1.0)
+    )
+}
+
 pub fn shade_block(pre: &CamPre, scene: &SceneRT, hit: &Hit, kind: BlockKind) -> Vector3 {
     let (base_lin, alpha) = sample_block_linear_alpha(&scene.mats, hit.uv, hit.face, kind, scene.is_night);
 
@@ -35,12 +72,16 @@ pub fn shade_block(pre: &CamPre, scene: &SceneRT, hit: &Hit, kind: BlockKind) ->
     let ambient = 0.12;
     let mut c_lin = base_lin * ambient;
     if !in_shadow { c_lin += base_lin * diff; }
+    
+    // Agregar luz de lámparas (solo de noche)
+    let lamp_light = calculate_lamp_light(scene, hit.p, n);
+    c_lin += base_lin * lamp_light;
 
     match kind {
         BlockKind::Leaves | BlockKind::Water => {
             // transparencia base (look fancy)
             let dir = (hit.p - pre.eye).normalized();
-            let bg = sky_srgb(dir);
+            let bg = sky_srgb(dir, scene.is_night);
             let a = alpha.clamp(0.0, 1.0);
             let mut c_srgb = gamma_encode(c_lin);
             c_srgb = bg * (1.0 - a) + c_srgb * a;
@@ -52,7 +93,7 @@ pub fn shade_block(pre: &CamPre, scene: &SceneRT, hit: &Hit, kind: BlockKind) ->
                 let kr = fresnel_schlick(cos_theta, 0.02);
                 let refl_srgb = match scene.water_mode {
                     WaterMode::Off => Vector3::new(0.0,0.0,0.0),
-                    WaterMode::SkyOnly => sky_srgb(r),
+                    WaterMode::SkyOnly => sky_srgb(r, scene.is_night),
                     WaterMode::ReflectOnce => trace_reflect_once(pre, scene, hit.p, r),
                 };
                 return c_srgb * (1.0 - kr) + refl_srgb * kr;
@@ -68,10 +109,10 @@ fn trace_reflect_once(pre:&CamPre, scene:&SceneRT, origin:Vector3, dir:Vector3) 
     // Para no duplicar lógica, llamamos a una versión simplificada local.
     if let Some((hit, kind)) = first_hit_fast(scene, origin, dir) {
         match kind {
-            BlockKind::Water => sky_srgb(dir),
+            BlockKind::Water => sky_srgb(dir, scene.is_night),
             k => shade_block(pre, scene, &hit, k),
         }
-    } else { sky_srgb(dir) }
+    } else { sky_srgb(dir, scene.is_night) }
 }
 
 // ===== Sombra y primer impacto: versión "rápida" basada en rejilla =====
@@ -129,9 +170,9 @@ fn first_hit_fast(scene:&SceneRT, o:Vector3, d:Vector3) -> Option<(Hit, BlockKin
 
     let (sx,sy,sz)=(if d.x>0.0{1}else{-1}, if d.y>0.0{1}else{-1}, if d.z>0.0{1}else{-1});
 
-    let mut next_x = g.min.x + (if d.x>0.0 {(ix+1) as f32} else {ix as f32});
-    let mut next_y = g.min.y + (if d.y>0.0 {(iy+1) as f32} else {iy as f32});
-    let mut next_z = g.min.z + (if d.z>0.0 {(iz+1) as f32} else {iz as f32});
+    let next_x = g.min.x + (if d.x>0.0 {(ix+1) as f32} else {ix as f32});
+    let next_y = g.min.y + (if d.y>0.0 {(iy+1) as f32} else {iy as f32});
+    let next_z = g.min.z + (if d.z>0.0 {(iz+1) as f32} else {iz as f32});
 
     let mut tmaxx= if d.x!=0.0 {(next_x-o.x)/d.x} else {f32::INFINITY};
     let mut tmaxy= if d.y!=0.0 {(next_y-o.y)/d.y} else {f32::INFINITY};
