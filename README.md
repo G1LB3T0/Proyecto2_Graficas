@@ -1,5 +1,9 @@
 # Proyecto 2 - Ray Tracing en CPU
 
+## VIDEO EXPLICATIVO EN YT
+
+- Link: https://youtu.be/2eAng2bGeBY
+
 ## Que es esto
 
 Este proyecto es un raytracer hecho en CPU usando Rust y raylib. Esta bastante bueno porque renderiza un mundo de Minecraft con iluminación realista, lámparas que de verdad alumbran, agua con reflejos y un cielo con estrellas.
